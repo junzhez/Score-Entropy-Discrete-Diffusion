@@ -161,7 +161,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         dt = (1 - eps) / steps
 
         x_prev = x.clone()
-        
+
         for i in range(steps):
             t = timesteps[i] * torch.ones(x.shape[0], 1, device=device)
             x = projector(x)
@@ -174,7 +174,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         loss_fn = losses.get_loss_fn(noise, graph, train=False)
 
         alpha1 = loss_fn(model, x).mean()
-        alpha2 = loss_fn(model, x_prev).mean()s
+        alpha2 = loss_fn(model, x_prev).mean()
         alpha = torch.clamp(torch.exp(alpha1-alpha2), max=1)
 
         print(alpha1, alpha2, alpha)
