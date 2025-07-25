@@ -173,8 +173,8 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         
         loss_fun = losses.get_loss_fn(noise, graph, train=False)
 
-        alpha1 = torch.exp(-loss_fun(model, x))
-        alpha2 = torch.clamp(torch.exp(-loss_fun(model, x_prev)), min=0.01)
+        alpha1 = loss_fun(model, x)
+        alpha2 = loss_fun(model, x_prev)
         alpha = torch.clamp(alpha1/alpha2, max=1)
 
         print(alpha1, alpha2, alpha)
