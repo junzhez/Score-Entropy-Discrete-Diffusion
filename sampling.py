@@ -102,8 +102,8 @@ class HamiltonianPredictor(Predictor):
         """
         sigma, dsigma = self.noise(t)
         score = score_fn(x, sigma)
-        stag_score = self.graph.staggered_score(score, sigma)
-        p = p - step_size/2 * stag_score
+
+        p = p - step_size/2 * score
 
         rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, score)
         x = self.graph.sample_rate(x, rev_rate) + step_size * p
@@ -171,10 +171,10 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             else:
                 x = predictor.update_fn(sampling_score_fn, x, t, dt)
         
-        loss_fn = losses.get_loss_fn(noise, graph, train=False)
-
-        alpha1 = loss_fn(model, x).mean()
-        alpha2 = loss_fn(model, x_prev).mean()
+        loss_fn = mutils.get_score_fn(model)
+        sigma, dsigma = noise(t)
+        alpha1 = loss_fn(x, sigma)
+        alpha2 = loss_fn(x_prev, sigma)
         alpha = torch.clamp(torch.exp(-alpha1+alpha2), max=1)
 
         print(alpha1, alpha2, alpha)
