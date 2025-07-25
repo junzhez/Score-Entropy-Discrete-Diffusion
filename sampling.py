@@ -172,9 +172,9 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
                 x = predictor.update_fn(sampling_score_fn, x, t, dt)
         
         loss_fun = losses.get_loss_fn(noise, graph, train=False)
-        alpha = np.min(1,np.exp(loss_fun(model, x))/np.exp(loss_fun(model, x_prev)))
+        alpha = torch.min(1,torch.exp(loss_fun(model, x))/torch.exp(loss_fun(model, x_prev)))
 
-        u = np.randn()
+        u = torch.randn()
 
         if u < alpha:
             x = x_prev
