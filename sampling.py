@@ -147,7 +147,7 @@ def get_sampling_fn(config, graph, noise, batch_dims, eps, device):
     return sampling_fn
     
 
-def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps=1e-5, device=torch.device('cpu'), proj_fun=lambda x: x):
+def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps=1e-5, device=torch.device('cpu'), proj_fun=lambda x: x,  threshold=False):
     predictor = get_predictor(predictor)(graph, noise)
     projector = proj_fun
     denoiser = Denoiser(graph, noise)
@@ -160,7 +160,6 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         timesteps = torch.linspace(1, eps, steps + 1, device=device)
         dt = (1 - eps) / steps
 
-        x_prev = x.clone()
 
         for i in range(steps):
             t = timesteps[i] * torch.ones(x.shape[0], 1, device=device)
@@ -171,18 +170,21 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             else:
                 x = predictor.update_fn(sampling_score_fn, x, t, dt)
         
-        loss_fun = losses.get_loss_fn(noise, graph, train=False)
+        if threshold:
+            x_prev = x.clone()
 
-        alpha1 = loss_fun(model, x)
-        alpha2 = loss_fun(model, x_prev)
-        alpha = torch.clamp(torch.exp(-alpha1+alpha2), max=1)
+            loss_fun = losses.get_loss_fn(noise, graph, train=False)
 
-        print(alpha1, alpha2, alpha)
+            alpha1 = loss_fun(model, x)
+            alpha2 = loss_fun(model, x_prev)
+            alpha = torch.clamp(torch.exp(alpha1-alpha2), max=1)
 
-        u = torch.randn(1, device=device)
+            print(alpha1, alpha2, alpha)
 
-        if u > alpha:
-            x = x_prev
+            u = torch.randn(1, device=device)
+
+            if u > alpha:
+                x = x_prev
         
         if denoise:
             # denoising step
