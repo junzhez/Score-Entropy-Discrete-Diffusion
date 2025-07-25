@@ -154,7 +154,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
     def pc_sampler(model):
         sampling_score_fn = mutils.get_score_fn(model, train=False, sampling=True)
         x = graph.sample_limit(*batch_dims).to(device)
-        p = torch.randn_like(x)
+        p = torch.randn_like(x, dtype=torch.float32)
         timesteps = torch.linspace(1, eps, steps + 1, device=device)
         dt = (1 - eps) / steps
 
