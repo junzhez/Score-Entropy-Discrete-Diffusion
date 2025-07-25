@@ -42,7 +42,7 @@ class Predictor(abc.ABC):
         self.noise = noise
 
     @abc.abstractmethod
-    def update_fn(self, score_fn, x, t, step_size):
+    def update_fn(self, score_fn, x, t, step_size, p):
         """One update of the predictor.
 
         Args:
@@ -58,7 +58,7 @@ class Predictor(abc.ABC):
 
 @register_predictor(name="euler")
 class EulerPredictor(Predictor):
-    def update_fn(self, score_fn, x, t, step_size):
+    def update_fn(self, score_fn, x, t, step_size, p=None):
         sigma, dsigma = self.noise(t)
         score = score_fn(x, sigma)
 
@@ -68,13 +68,12 @@ class EulerPredictor(Predictor):
 
 @register_predictor(name="none")
 class NonePredictor(Predictor):
-    def update_fn(self, score_fn, x, t, step_size):
+    def update_fn(self, score_fn, x, t, step_size, p=None):
         return x
-
 
 @register_predictor(name="analytic")
 class AnalyticPredictor(Predictor):
-    def update_fn(self, score_fn, x, t, step_size):
+    def update_fn(self, score_fn, x, t, step_size, p=None):
         curr_sigma = self.noise(t)[0]
         next_sigma = self.noise(t - step_size)[0]
         dsigma = curr_sigma - next_sigma
@@ -85,7 +84,34 @@ class AnalyticPredictor(Predictor):
         probs = stag_score * self.graph.transp_transition(x, dsigma)
         return sample_categorical(probs)
 
-    
+@register_predictor(name="hamiltonian")
+class HamiltonianPredictor(Predictor):
+    def update_fn(self, score_fn, x, t, step_size, p):
+        """
+        Hamiltonian-inspired update using auxiliary momentum variable p.
+        Args:
+            score_fn: score function
+            x: current state tensor
+            t: current time tensor
+            step_size: integration step size
+            p: momentum tensor (should be same length as x)
+        Returns:
+            Updated state tensor x.
+        """
+        sigma, dsigma = self.noise(t)
+        score = score_fn(x, sigma)
+
+        p = p - step_size/2 * score
+
+        rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, score)
+        x = self.graph.sample_rate(x, rev_rate) + step_size * p
+
+        sigma, dsigma = self.noise(t + step_size)
+        score = score_fn(x, sigma)
+        p = p - step_size/2 * score
+
+        return x, p
+
 class Denoiser:
     def __init__(self, graph, noise):
         self.graph = graph
@@ -128,15 +154,19 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
     def pc_sampler(model):
         sampling_score_fn = mutils.get_score_fn(model, train=False, sampling=True)
         x = graph.sample_limit(*batch_dims).to(device)
+        p = torch.randn_like(x)
         timesteps = torch.linspace(1, eps, steps + 1, device=device)
         dt = (1 - eps) / steps
 
         for i in range(steps):
             t = timesteps[i] * torch.ones(x.shape[0], 1, device=device)
             x = projector(x)
-            x = predictor.update_fn(sampling_score_fn, x, t, dt)
+            if type(predictor) is HamiltonianPredictor:
+                # Hamiltonian update
+                x, p = predictor.update_fn(sampling_score_fn, x, t, dt, p)
+            else:
+                x = predictor.update_fn(sampling_score_fn, x, t, dt)
             
-
         if denoise:
             # denoising step
             x = projector(x)
