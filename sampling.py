@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from catsample import sample_categorical
 
 from model import utils as mutils
-from transformers import GPT2TokenizerFast, GPT2LMHeadModel
 
 _PREDICTORS = {}
 
@@ -162,6 +161,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         dt = (1 - eps) / steps
 
         x_prev = x.clone()
+        
         for i in range(steps):
             t = timesteps[i] * torch.ones(x.shape[0], 1, device=device)
             x = projector(x)
@@ -171,16 +171,13 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             else:
                 x = predictor.update_fn(sampling_score_fn, x, t, dt)
         
-        
+        loss_fn = losses.get_loss_fn(noise, graph, train=False)
 
-        eval_model = GPT2LMHeadModel.from_pretrained("gpt2").to(device).eval()
+        alpha1 = loss_fn(model, x).mean()
+        alpha2 = loss_fn(model, x_prev).mean()s
+        alpha = torch.clamp(torch.exp(alpha1-alpha2), max=1)
 
-        loss1, alpha1 = eval_model(x, labels=x)[:2]
-        loss2, alpha2 = eval_model(x_prev, labels=x_prev)[:2]
-
-        alpha = torch.clamp(torch.exp(sum(alpha1-alpha2)), max=1)
-
-        print(alpha)
+        print(alpha1, alpha2, alpha)
         
         if threshold:
             u = torch.randn(1, device=device)
@@ -194,8 +191,6 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             t = timesteps[-1] * torch.ones(x.shape[0], 1, device=device)
             x = denoiser.update_fn(sampling_score_fn, x, t)
             
-        del eval_model
-
         return x
     
     return pc_sampler
