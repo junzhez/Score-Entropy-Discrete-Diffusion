@@ -180,7 +180,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
 
         alpha = torch.clamp(torch.exp(sum(alpha1-alpha2)), max=1)
 
-        print(loss1, sum(alpha1), loss2, sum(alpha2), alpha)
+        print(alpha)
         
         if threshold:
             u = torch.randn(1, device=device)
