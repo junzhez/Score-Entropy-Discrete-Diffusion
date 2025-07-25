@@ -7,6 +7,9 @@ from catsample import sample_categorical
 
 from model import utils as mutils
 
+from transformers import GPT2TokenizerFast, GPT2LMHeadModel
+
+
 _PREDICTORS = {}
 
 
@@ -171,13 +174,9 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             else:
                 x = predictor.update_fn(sampling_score_fn, x, t, dt)
         
-        loss_fn = mutils.get_score_fn(model)
-        sigma, dsigma = noise(t)
-        alpha1 = loss_fn(x, sigma)
-        alpha2 = loss_fn(x_prev, sigma)
-        alpha = torch.clamp(torch.exp(-alpha1+alpha2), max=1)
+        eval_model = GPT2LMHeadModel.from_pretrained("gpt2").to(device).eval()
+        loss1, logits1 = eval_model(x, labels=x)[:2]
 
-        print(alpha1, alpha2, alpha)
         
         if threshold:
             u = torch.randn(1, device=device)
