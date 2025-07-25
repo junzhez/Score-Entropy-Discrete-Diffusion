@@ -173,13 +173,13 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         
         loss_fun = losses.get_loss_fn(noise, graph, train=False)
 
-        alpha1 = torch.exp(loss_fun(model, x)).item()
-        alpha2 = torch.clamp(torch.exp(loss_fun(model, x_prev)), min=0.01).item()
-        alpha = alpha1 / alpha2
+        alpha1 = loss_fun(model, x)
+        alpha2 = torch.clamp(loss_fun(model, x_prev), min=0.01)
+        alpha = torch.clamp(alpha1/alpha2, max=1)
 
         print(alpha1, alpha2, alpha)
 
-        u = np.random.rand(1)
+        u = torch.randn(1)
 
         if u > alpha:
             x = x_prev
