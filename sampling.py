@@ -160,7 +160,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         timesteps = torch.linspace(1, eps, steps + 1, device=device)
         dt = (1 - eps) / steps
 
-
+        x_prev = x.clone()
         for i in range(steps):
             t = timesteps[i] * torch.ones(x.shape[0], 1, device=device)
             x = projector(x)
@@ -170,7 +170,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             else:
                 x = predictor.update_fn(sampling_score_fn, x, t, dt)
         
-        x_prev = x.clone()
+        
 
         loss_fun = losses.get_loss_fn(noise, graph, train=False)
 
