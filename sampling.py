@@ -175,9 +175,9 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         alpha = torch.clamp(torch.exp(loss_fun(model, x)) / torch.exp(loss_fun(model, x_prev)), max=1.0).item()
 
         print(alpha)
-        u = np.random.randn()
+        u = torch.randn(1, device=device).item()
 
-        if u < alpha:
+        if u > alpha:
             x = x_prev
         
         if denoise:
