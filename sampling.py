@@ -101,7 +101,7 @@ class HamiltonianPredictor(Predictor):
         sigma, dsigma = self.noise(t)
         score = score_fn(x, sigma)
 
-        p = p - step_size/2 * score
+        p = p - score
 
         rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, score)
         x = self.graph.sample_rate(x, rev_rate) + step_size * p
