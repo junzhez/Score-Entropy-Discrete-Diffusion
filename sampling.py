@@ -175,7 +175,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         alpha = torch.clamp(torch.exp(loss_fun(model, x)) / torch.exp(loss_fun(model, x_prev)), max=1.0).item()
 
         print(alpha)
-        u = np.randn()
+        u = np.random.randn()
 
         if u < alpha:
             x = x_prev
