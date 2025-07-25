@@ -1,5 +1,7 @@
 import abc
 import torch
+import losses
+import numpy as np
 import torch.nn.functional as F
 from catsample import sample_categorical
 
@@ -101,7 +103,7 @@ class HamiltonianPredictor(Predictor):
         sigma, dsigma = self.noise(t)
         score = score_fn(x, sigma)
 
-        p = p - score
+        p = p - step_size/2 * score
 
         rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, score)
         x = self.graph.sample_rate(x, rev_rate) + step_size * p
@@ -158,6 +160,8 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         timesteps = torch.linspace(1, eps, steps + 1, device=device)
         dt = (1 - eps) / steps
 
+        x_prev = x.clone()
+
         for i in range(steps):
             t = timesteps[i] * torch.ones(x.shape[0], 1, device=device)
             x = projector(x)
@@ -166,7 +170,15 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
                 x, p = predictor.update_fn(sampling_score_fn, x, t, dt, p)
             else:
                 x = predictor.update_fn(sampling_score_fn, x, t, dt)
-            
+        
+        loss_fun = losses.get_loss_fn(noise, graph, train=False)
+        alpha = np.min(1,np.exp(loss_fun(model, x))/np.exp(loss_fun(model, x_prev)))
+
+        u = np.randn()
+
+        if u < alpha:
+            x = x_prev
+        
         if denoise:
             # denoising step
             x = projector(x)
