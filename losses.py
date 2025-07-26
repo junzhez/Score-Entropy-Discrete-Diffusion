@@ -17,6 +17,7 @@ def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False):
             if lv:
                 raise NotImplementedError("Yeah I gotta do this later")
             else:
+                print(batch.shape[0])
                 t = (1 - sampling_eps) * torch.rand(batch.shape[0], device=batch.device) + sampling_eps
             
         sigma, dsigma = noise(t)
