@@ -157,6 +157,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
     @torch.no_grad()
     def pc_sampler(model):
         sampling_score_fn = mutils.get_score_fn(model, train=False, sampling=True)
+        log_score_fn = mutils.get_score_fn(model, train=False)
         x = graph.sample_limit(*batch_dims).to(device)
 
         if threshold:
@@ -164,22 +165,42 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             dt = (1 - eps) / (N * steps)
             for j in range(N):
                 x_prev = x.clone()
-
                 for i in range(steps):
                     t = timesteps[i + steps*j] * torch.ones(x.shape[0], 1, device=device)
                     x = projector(x)
                     x = predictor.update_fn(sampling_score_fn, x, t, dt)
-        
-                sigma = noise(t)[0]
-                score = sampling_score_fn(x_prev, sigma)
 
-                alpha = torch.clamp(torch.exp(graph.reverse_rate(x, score)+1), max=1)
+                d = (x != x_prev)
+                di = torch.arange(0, batch_dims[1], device=device).view(1, batch_dims[1])[d]
+                dv = x[d]
 
-                print(alpha)
-                u = torch.randn(1, device=device)
+                alpha = torch.tensor(0.0, device=device)
+                x_ = x_prev.clone()
+                
+                for i in range(d.sum()):
+                    sigma = noise(t)[0]
+                    score = log_score_fn(x_, sigma)
+                    alpha += score[0, di[i], dv[i]]
+                    x_[0, di[i]] = dv[i]
+                    del sigma, score
+
+                del x_
+
+                
+                alpha = torch.clamp(torch.exp(alpha), max=1)
+
+                #loss_fn = losses.get_loss_fn(noise, graph, train=False)
+                #alpha1 = loss_fn(model, x.repeat(100, 1)).mean()
+                #alpha2 = loss_fn(model, x_prev.repeat(100, 1)).mean()
+                #alpha = torch.clamp(torch.exp(-alpha1+alpha2), max=1)
+                
+                u = torch.rand(1, device=device)
+
+                print(alpha, u)
 
                 if u > alpha:
                     x = x_prev
+                    
         else:
             timesteps = torch.linspace(1, eps, steps + 1, device=device)
             dt = (1 - eps) / steps
