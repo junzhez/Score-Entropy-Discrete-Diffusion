@@ -170,11 +170,10 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
                     x = projector(x)
                     x = predictor.update_fn(sampling_score_fn, x, t, dt)
         
-                loss_fn = losses.get_loss_fn(noise, graph, train=False)
+                sigma = noise(t)[0]
+                score = sampling_score_fn(x_prev, sigma)
 
-                alpha1 = loss_fn(model, x.repeat(10, 1)).mean()
-                alpha2 = loss_fn(model, x_prev.repeat(10, 1)).mean()
-                alpha = torch.clamp(torch.exp((-alpha1+alpha2)/1000), max=1)
+                alpha = torch.clamp(torch.exp(graph.reverse_rate(x, score)+1), max=1)
 
                 print(alpha)
                 u = torch.randn(1, device=device)
