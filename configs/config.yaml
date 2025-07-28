@@ -24,7 +24,7 @@ data:
   cache_dir: data
 
 graph:
-  type: absorb
+  type: uniform
   file: data
   report_all: False
 
