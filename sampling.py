@@ -68,12 +68,13 @@ class EulerPredictor(Predictor):
 
         rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, score)
         x = self.graph.sample_rate(x, rev_rate)
-        return x
+        
+        return x, p
 
 @register_predictor(name="none")
 class NonePredictor(Predictor):
     def update_fn(self, score_fn, x, t, step_size, p=None):
-        return x
+        return x, p
 
 @register_predictor(name="analytic")
 class AnalyticPredictor(Predictor):
@@ -86,35 +87,23 @@ class AnalyticPredictor(Predictor):
 
         stag_score = self.graph.staggered_score(score, dsigma)
         probs = stag_score * self.graph.transp_transition(x, dsigma)
-        return sample_categorical(probs)
+        return sample_categorical(probs), p
 
 @register_predictor(name="hamiltonian")
 class HamiltonianPredictor(Predictor):
     def update_fn(self, score_fn, x, t, step_size, p):
-        """
-        Hamiltonian-inspired update using auxiliary momentum variable p.
-        Args:
-            score_fn: score function
-            x: current state tensor
-            t: current time tensor
-            step_size: integration step size
-            p: momentum tensor (should be same length as x)
-        Returns:
-            Updated state tensor x.
-        """
         sigma, dsigma = self.noise(t)
         score = score_fn(x, sigma)
         
-        p = p - step_size/2 * score
+        p += step_size/2 * dsigma[..., None] * self.graph.reverse_rate(x, score)
 
-        rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, score)
-        x = self.graph.sample_rate(x, rev_rate) + step_size * p
-
-        sigma, dsigma = self.noise(t + step_size)
+        x = self.graph.sample_rate(x, p)
+        
         score = score_fn(x, sigma)
-        p = p - step_size/2 * score
 
-        return x, p
+        p += step_size/2 * dsigma[..., None] * self.graph.reverse_rate(x, score)
+
+        return x, -p
 
 class Denoiser:
     def __init__(self, graph, noise):
@@ -159,6 +148,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         sampling_score_fn = mutils.get_score_fn(model, train=False, sampling=True)
         log_score_fn = mutils.get_score_fn(model, train=False)
         x = graph.sample_limit(*batch_dims).to(device)
+        p = torch.randn(*batch_dims, 50258).to(device)
 
         if threshold:
             timesteps = torch.linspace(1, eps, N * steps + 1, device=device)
@@ -168,7 +158,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
                 for i in range(steps):
                     t = timesteps[i + steps*j] * torch.ones(x.shape[0], 1, device=device)
                     x = projector(x)
-                    x = predictor.update_fn(sampling_score_fn, x, t, dt)
+                    x, p = predictor.update_fn(sampling_score_fn, x, t, dt, p)
 
                 d = (x != x_)
                 di = torch.arange(0, batch_dims[1], device=device).view(1, batch_dims[1])[d]
@@ -177,10 +167,13 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
                 for i in range(d.sum()):
                     sigma = noise(torch.tensor(temp, device=device))[0]
                     score = log_score_fn(x_, sigma)
-                
+
                     alpha = torch.clamp(score[0, di[i], dv[i]].exp(), max=1)
                     u = torch.rand(1, device=device)
-                    
+
+                    if alpha < 1:
+                        print(alpha, u)
+                        
                     if u > alpha:
                         x[0, di[i]] = x_[0, di[i]]
                         
@@ -192,7 +185,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             for i in range(steps):
                 t = timesteps[i] * torch.ones(x.shape[0], 1, device=device)
                 x = projector(x)
-                x = predictor.update_fn(sampling_score_fn, x, t, dt)
+                x, p = predictor.update_fn(sampling_score_fn, x, t, dt, p)
         
         if denoise:
             # denoising step
