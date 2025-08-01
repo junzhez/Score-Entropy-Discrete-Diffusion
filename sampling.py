@@ -97,7 +97,7 @@ class HamiltonianPredictor(Predictor):
         
         p += step_size/2 * score
         
-        rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(p, score)
+        rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, score)
         x = self.graph.sample_rate(x, rev_rate)
         
         score = score_fn(x, sigma)
@@ -155,6 +155,7 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
             timesteps = torch.linspace(1, eps, N * steps + 1, device=device)
             dt = (1 - eps) / (N * steps)
             for j in range(N):
+                print(j)
                 p_ = p.clone()
                 x_ = x.clone()
                 for i in range(steps):
@@ -171,11 +172,13 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
                     score = log_score_fn(x_, sigma)
 
                     alpha1 = score[0, di[i], dv[i]]
-                    alpha2 = 0.5*(p[0, di[i], dv[i]].pow(2) - p_[0, di[i], dv[i]].pow(2)).sum()
+                    alpha2 = 0.5*(p[0, di[i], :].pow(2) - p_[0, di[i], :].pow(2)).sum()
             
                     alpha = torch.exp(alpha1 - alpha2).clamp(max=1.0)
                     u = torch.rand(1, device=device)
-                        
+                    
+                    print(alpha1, alpha2, alpha)
+                    
                     if u > alpha:
                         x[0, di[i]] = x_[0, di[i]]
                         p[0, di[i], :] = p_[0, di[i], :]
