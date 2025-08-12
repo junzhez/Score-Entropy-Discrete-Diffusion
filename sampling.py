@@ -171,11 +171,8 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
                     sigma = noise(torch.tensor(temp, device=device))[0]
                     score = log_score_fn(x_, sigma)
             
-                    alpha1 = score[0, di[i], dv[i]]
-                    alpha2 = 0.5*(p[0, di[i], :].pow(2) - p_[0, di[i], :].pow(2)).sum()
-
-                    alpha = torch.exp(alpha1 - alpha2).clamp(max=1.0)
-                    u = torch.rand(1, device=device)             
+                    alpha = torch.exp(score[0, di[i], dv[i]]).clamp(max=1.0)
+                    u = torch.rand(1, device=device)                    
 
                     if u > alpha:
                         print(alpha, u)
