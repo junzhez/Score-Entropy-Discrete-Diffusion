@@ -98,7 +98,8 @@ class HamiltonianPredictor(Predictor):
         rev_rate = step_size/2 * dsigma[..., None] * self.graph.reverse_rate(x, score)
         p = self.graph.sample_rate(p, rev_rate)
 
-        x = self.graph.sample_rate(p, step_size * rev_rate)
+        rev_rate = step_size * dsigma[..., None] * self.graph.reverse_rate(x, 0.00001)
+        x = self.graph.sample_rate(p, rev_rate)
 
         score = score_fn(x, sigma)
                 
