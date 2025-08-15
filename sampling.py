@@ -98,15 +98,17 @@ class HamiltonianPredictor(Predictor):
         rev_rate = step_size/2 * dsigma[..., None] * self.graph.reverse_rate(x, score)
         p = self.graph.sample_rate(x, rev_rate)
 
-        rev_rate = step_size * self.graph.reverse_rate(p, 0.000002)
+        sigma, dsigma = self.noise(t + step_size/2)
+        rev_rate = step_size**2 * dsigma[..., None] * self.graph.rate(p)
         x = self.graph.sample_rate(p, rev_rate)
 
         if (x != p).sum() > 0:
             print((x != p).sum())
-            
+
+        sigma, dsigma = self.noise(t + step_size/2 - step_size**2)
         score = score_fn(x, sigma)
                 
-        rev_rate = step_size / 2 * dsigma[..., None] * self.graph.reverse_rate(x, score)
+        rev_rate = (step_size / 2 + step_size**2) * dsigma[..., None] * self.graph.reverse_rate(x, score)
         p = self.graph.sample_rate(x, rev_rate)
         
         return x, p
@@ -171,20 +173,24 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
                 di = torch.arange(0, batch_dims[1], device=device).view(1, batch_dims[1])[d]
                 dv = x[d]
 
+                reset = False
                 for i in range(d.sum()):
                     sigma = noise(torch.tensor(temp, device=device))[0]
                     score = log_score_fn(x_, sigma)
             
-                    alpha = torch.exp(score[0, di[i], dv[i]]).clamp(max=1.0)
+                    alpha = torch.exp(score[0, di[i], dv[i]]).clamp(max = 1)
+                    #alpha2 = (p_[0, di[i]] == (graph.dim-1)).clamp(min = eps) / (p[0, di[i]] == (graph.dim-1)).clamp(min = eps)
+                    #alpha = (alpha1 * alpha2).clamp(max = 1)
                     u = torch.rand(1, device=device)                    
 
                     if u > alpha:
                         print(alpha, u)
+                        reset = True
                         x[0, di[i]] = x_[0, di[i]]
                         p[0, di[i]] = p_[0, di[i]]
-                        
-                    del sigma, score
 
+                if reset:
+                    j -= 1
         else:
             timesteps = torch.linspace(1, eps, steps + 1, device=device)
             dt = (1 - eps) / steps
