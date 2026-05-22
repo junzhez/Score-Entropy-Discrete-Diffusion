@@ -14,6 +14,11 @@ def main():
     parser.add_argument("--steps", type=int, default=1024)
     parser.add_argument("--prefix", type=str, default="Hi, my name is")
     parser.add_argument("--suffix", type=str, default=" and that's why I'm late.")
+    parser.add_argument("--corrector", default="none")          # "none" | "lb_mean_field"
+    parser.add_argument("--corrector_steps", type=int, default=0)
+    parser.add_argument("--balancing", default="barker")        # "barker" | "sqrt"
+    parser.add_argument("--update_fraction", type=float, default=1.0)
+    parser.add_argument("--corrector_t_threshold", type=float, default=0.0)
     args = parser.parse_args()
 
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
@@ -39,7 +44,10 @@ def main():
     
 
     sampling_fn = sampling.get_pc_sampler(
-        graph, noise, (args.batch_size, 1024), 'analytic', args.steps, device=device, proj_fun=proj_fun
+        graph, noise, (args.batch_size, 1024), 'analytic', args.steps, device=device, proj_fun=proj_fun,
+        corrector=args.corrector, corrector_steps=args.corrector_steps,
+        balancing=args.balancing, update_fraction=args.update_fraction,
+        corrector_t_threshold=args.corrector_t_threshold,
     )
 
     samples = proj_fun(sampling_fn(model))

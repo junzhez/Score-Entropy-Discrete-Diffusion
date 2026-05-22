@@ -37,6 +37,11 @@ sampling:
   predictor: euler
   steps: 128
   noise_removal: True
+  corrector: none            # "none" | "lb_mean_field"
+  corrector_steps: 0         # K corrector iterations per level; 0 reproduces vanilla SEDD exactly
+  balancing: barker          # "barker" | "sqrt" (lb_mean_field balancing function)
+  update_fraction: 1.0       # fraction of positions updated per corrector step
+  corrector_t_threshold: 0.0 # only run corrector while t_next >= threshold
 
 eval:
   batch_size: 512

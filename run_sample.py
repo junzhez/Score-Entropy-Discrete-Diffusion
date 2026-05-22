@@ -13,6 +13,11 @@ def main():
     parser.add_argument("--dataset", default="wikitext103", type=str)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--steps", type=int, default=1024)
+    parser.add_argument("--corrector", default="none")          # "none" | "lb_mean_field"
+    parser.add_argument("--corrector_steps", type=int, default=0)
+    parser.add_argument("--balancing", default="barker")        # "barker" | "sqrt"
+    parser.add_argument("--update_fraction", type=float, default=1.0)
+    parser.add_argument("--corrector_t_threshold", type=float, default=0.0)
     args = parser.parse_args()
 
     
@@ -21,7 +26,10 @@ def main():
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
 
     sampling_fn = sampling.get_pc_sampler(
-        graph, noise, (args.batch_size, 1024), 'analytic', args.steps, device=device
+        graph, noise, (args.batch_size, 1024), 'analytic', args.steps, device=device,
+        corrector=args.corrector, corrector_steps=args.corrector_steps,
+        balancing=args.balancing, update_fraction=args.update_fraction,
+        corrector_t_threshold=args.corrector_t_threshold,
     )
 
     samples = sampling_fn(model)
