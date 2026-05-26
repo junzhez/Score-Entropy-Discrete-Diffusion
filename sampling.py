@@ -132,19 +132,29 @@ class NoneCorrector(Corrector):
 
 @register_corrector(name="lb_mean_field")
 class LBMeanFieldCorrector(Corrector):
-    """Parallel locally-balanced (Zanella) Metropolis-Hastings corrector.
+    """Unified locally-balanced (Zanella) Metropolis-Hastings corrector.
 
-    At a fixed noise level, proposes a token flip at every position
+    At a fixed noise level, proposes a token flip at eligible positions
     simultaneously and accepts/rejects each position independently under
     SEDD's mean-field factorization (the same factorization the tau-leap
-    predictor already assumes). Costs two score-function calls per step.
-    See .claude/skills/lb_corrector_parallel_recipe.md for the derivation.
+    predictor already assumes). The variant (Uniform vs Absorb) is detected
+    from ``graph.absorb`` and selects both the proposal mask (which flips
+    Q^tok allows) and the acceptance form:
+
+    - Uniform: any token may flip to any other; Zanella Z_x/Z_y acceptance
+      (two score-function calls per step).
+    - Absorb: only masked positions flip to data tokens (unmasked positions
+      are frozen); noising-kernel reverse acceptance (one score call).
+
+    Both variants use Barker acceptance. See
+    .claude/skills/lb_corrector_unified_recipe.md for the derivation.
     """
 
     def __init__(self, graph, noise, *, balancing="barker", update_fraction=1.0, eps=1e-30):
         super().__init__(graph, noise)
         self.update_fraction = update_fraction
         self.eps = eps
+        self.last_info = None       # per-step diagnostics, stashed for inspection
         if balancing == "barker":
             self._g = lambda r: r / (1.0 + r)
             self._g_self = 0.5          # g(1)
@@ -158,6 +168,7 @@ class LBMeanFieldCorrector(Corrector):
         # Bridge t -> sigma exactly like the predictors; score_fn expects sigma.
         sigma = self.noise(t)[0]
         g, g_self, eps = self._g, self._g_self, self.eps
+        absorb = self.graph.absorb
         B, L = x.shape
         device = x.device
         batch_idx = torch.arange(B, device=device).unsqueeze(1).expand(B, L)
@@ -169,34 +180,81 @@ class LBMeanFieldCorrector(Corrector):
         score_x = score_fn(x, sigma).float()
         score_x[batch_idx, pos_idx, x] = 0.0
         score_x = score_x.clamp(min=eps)
-        full_g_x = g(score_x)
+        K = score_x.shape[-1]
+
+        # Transition mask from Q^tok: which flips x_i -> k are allowed.
+        g_x = g(score_x)
+        if absorb:
+            mask_id = self.graph.dim - 1
+            is_masked = (x == mask_id)                                  # [B, L]
+            not_mask_token = (torch.arange(K, device=device) != mask_id)
+            transition_mask = is_masked.unsqueeze(-1) & not_mask_token.view(1, 1, K)
+            full_g_x = torch.where(transition_mask, g_x, torch.zeros_like(g_x))
+        else:
+            full_g_x = g_x.clone()
         full_g_x[batch_idx, pos_idx, x] = g_self    # "stay" weight = g(1)
         Z_x = full_g_x.sum(dim=-1)                  # [B, L]
         probs = full_g_x / Z_x.unsqueeze(-1)
 
-        K = score_x.shape[-1]
         proposed = torch.multinomial(probs.view(B * L, K), 1).squeeze(-1).view(B, L)
-        if self.update_fraction < 1.0:
-            mask = torch.rand(B, L, device=device) < self.update_fraction
-            proposed = torch.where(mask, proposed, x)
 
-        y = proposed
+        # Eligible positions: where a flip is even possible. Uniform -> all;
+        # Absorb -> masked positions only. update_fraction subsamples within these.
+        eligible = is_masked if absorb else torch.ones_like(x, dtype=torch.bool)
+        if self.update_fraction < 1.0:
+            do_propose = eligible & (torch.rand(B, L, device=device) < self.update_fraction)
+        else:
+            do_propose = eligible
+        y = torch.where(do_propose, proposed, x)
+
         flipped = (y != x)
         if not flipped.any():
+            self.last_info = {
+                "acceptance_rate": torch.tensor(1.0),
+                "flip_rate": torch.tensor(0.0),
+                "n_proposed_flips": torch.tensor(0.0),
+                "mean_log_rho": torch.tensor(0.0),
+            }
             return x                                # skip the second score call
 
-        # Second score call at the proposed state y.
-        # Per-position acceptance: alpha_i = min(1, Z_x_i / Z_y_i).
-        score_y = score_fn(y, sigma).float()
-        score_y[batch_idx, pos_idx, y] = 0.0
-        score_y = score_y.clamp(min=eps)
-        full_g_y = g(score_y)
-        full_g_y[batch_idx, pos_idx, y] = g_self
-        Z_y = full_g_y.sum(dim=-1)
+        # Per-position acceptance ratio rho_i, variant-specific.
+        if absorb:
+            # Noising-kernel reverse: rho_i = s(x)_{i,y_i} * Z_x_i / g(s(x)_{i,y_i}).
+            # No second score call needed.
+            s_at_y = score_x.gather(-1, y.unsqueeze(-1)).squeeze(-1)
+            g_s_at_y = g_x.gather(-1, y.unsqueeze(-1)).squeeze(-1)
+            log_rho = (
+                torch.log(s_at_y.clamp(min=eps))
+                + torch.log(Z_x.clamp(min=eps))
+                - torch.log(g_s_at_y.clamp(min=eps))
+            )
+        else:
+            # Zanella clean cancellation: rho_i = Z_x_i / Z_y_i.
+            # Second score call at the proposed state y.
+            score_y = score_fn(y, sigma).float()
+            score_y[batch_idx, pos_idx, y] = 0.0
+            score_y = score_y.clamp(min=eps)
+            full_g_y = g(score_y)
+            full_g_y[batch_idx, pos_idx, y] = g_self
+            Z_y = full_g_y.sum(dim=-1)
+            log_rho = torch.log(Z_x.clamp(min=eps)) - torch.log(Z_y.clamp(min=eps))
 
-        log_alpha = torch.log(Z_x) - torch.log(Z_y)
-        accept = torch.log(torch.rand_like(log_alpha)) < log_alpha
-        return torch.where(flipped & accept, y, x)
+        # Barker acceptance per position: log alpha = log sigmoid(log_rho).
+        log_alpha = -F.softplus(-log_rho)
+        accept = torch.log(torch.rand_like(log_alpha).clamp(min=eps)) < log_alpha
+
+        do_commit = flipped & accept
+        new_x = torch.where(do_commit, y, x)
+
+        n_proposed = flipped.float().sum()
+        n_accepted = do_commit.float().sum()
+        self.last_info = {
+            "acceptance_rate": (n_accepted / n_proposed.clamp(min=1)).detach(),
+            "flip_rate": (n_accepted / float(B * L)).detach(),
+            "n_proposed_flips": n_proposed.detach(),
+            "mean_log_rho": log_rho[flipped].mean().detach(),
+        }
+        return new_x
 
 
 class Denoiser:
